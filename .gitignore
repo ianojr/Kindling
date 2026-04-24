@@ -54,3 +54,8 @@ build-out.txt
 build-err.txt
 build-result.txt
 skills-lock.json
+
+# agent internal
+.agents/
+.claude/
+.gemini/
