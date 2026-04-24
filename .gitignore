@@ -4,11 +4,6 @@
 /node_modules
 /.pnp
 .pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
 # testing
 /coverage
@@ -30,11 +25,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
+!.env.example
 
 # vercel
 .vercel
+
+# netlify
+.netlify/
 
 # typescript
 *.tsbuildinfo
@@ -43,6 +42,15 @@ next-env.d.ts
 # anchor build artifacts
 /anchor/.anchor/
 /anchor/target/
+/anchor/node_modules/
 
 # solana local validator
 test-ledger/
+
+# dev logs
+dev-out.log
+dev-err.log
+build-out.txt
+build-err.txt
+build-result.txt
+skills-lock.json

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useWallet } from "../lib/wallet/context";
 import { useSendTransaction } from "../lib/hooks/use-send-transaction";
 import { useBalance } from "../lib/hooks/use-balance";
+import { useSolPrice } from "../lib/hooks/use-sol-price";
 import { lamportsFromSol, lamportsToSolString } from "../lib/lamports";
 import { type Address } from "@solana/kit";
 import { toast } from "sonner";
@@ -15,54 +16,142 @@ import {
 import { parseTransactionError } from "../lib/errors";
 import { useCluster } from "./cluster-context";
 
+/* ── quick-amount presets ──────────────────────────────────────────── */
+const PRESETS = ["0.1", "0.25", "0.5", "1"];
+
+/* ── tiny icons ───────────────────────────────────────────────────── */
+function ArrowDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 4v16m0 0l-6-6m6 6l6-6"
+      />
+    </svg>
+  );
+}
+function ArrowUpIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 20V4m0 0l-6 6m6-6l6 6"
+      />
+    </svg>
+  );
+}
+function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.75}
+    >
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path
+        strokeLinecap="round"
+        d="M7 11V7a5 5 0 0 1 10 0v4"
+      />
+    </svg>
+  );
+}
+function SpinnerIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={`${className} animate-spin`}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
 export function VaultCard() {
   const { wallet, signer, status } = useWallet();
   const { send, isSending } = useSendTransaction();
   const { getExplorerUrl } = useCluster();
+  const { price } = useSolPrice();
 
   const [amount, setAmount] = useState("");
   const [vaultAddress, setVaultAddress] = useState<Address | null>(null);
+  const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
 
   const walletAddress = wallet?.account.address;
 
-  // Derive vault PDA from generated IDL client
+  /* derive vault PDA */
   useEffect(() => {
     let cancelled = false;
-
-    async function deriveVault() {
-      if (!signer) {
-        setVaultAddress(null);
-        return;
-      }
-
+    async function derive() {
+      if (!signer) { setVaultAddress(null); return; }
       try {
         const ix = await getWithdrawInstructionAsync({ signer });
         const pda = ix.accounts[1]?.address;
         if (!cancelled) setVaultAddress((pda as Address) ?? null);
-      } catch {
-        if (!cancelled) setVaultAddress(null);
-      }
+      } catch { if (!cancelled) setVaultAddress(null); }
     }
-
-    void deriveVault();
-    return () => {
-      cancelled = true;
-    };
+    void derive();
+    return () => { cancelled = true; };
   }, [signer]);
 
-  // Get balances
   const walletBalance = useBalance(walletAddress);
   const walletLamports = walletBalance?.lamports;
   const vaultBalance = useBalance(vaultAddress ?? undefined);
   const vaultLamports = vaultBalance?.lamports;
 
+  const hasVaultFunds = (vaultLamports ?? 0n) > 0n;
+
+  const depositLamports = amount ? lamportsFromSol(parseFloat(amount)) : 0n;
+  const depositUsd =
+    amount && price
+      ? (parseFloat(amount) * price.usd).toLocaleString("en-US", {
+          style: "currency",
+          currency: "USD",
+        })
+      : null;
+  const vaultUsd =
+    vaultLamports && price
+      ? ((Number(vaultLamports) / 1e9) * price.usd).toLocaleString("en-US", {
+          style: "currency",
+          currency: "USD",
+        })
+      : null;
+
   const handleDeposit = useCallback(async () => {
     if (!walletAddress || !vaultAddress || !amount || !signer) return;
 
-    const depositLamports = lamportsFromSol(parseFloat(amount));
     if (walletLamports != null && walletLamports < depositLamports) {
-      toast.error("Insufficient balance.", {
-        description: `You need at least ${amount} SOL plus fees. Current balance: ${lamportsToSolString(walletLamports)} SOL.`,
+      toast.error("Insufficient balance", {
+        description: `Need ${amount} SOL + fees. You have ${lamportsToSolString(walletLamports)} SOL.`,
       });
       return;
     }
@@ -73,10 +162,8 @@ export function VaultCard() {
         vault: vaultAddress,
         amount: lamportsFromSol(parseFloat(amount)),
       });
-
       const signature = await send({ instructions: [instruction] });
-
-      toast.success("Deposit confirmed!", {
+      toast.success("Deposit confirmed! 🎉", {
         description: (
           <a
             href={getExplorerUrl(`/tx/${signature}`)}
@@ -84,7 +171,7 @@ export function VaultCard() {
             rel="noopener noreferrer"
             className="underline"
           >
-            View transaction
+            View on Explorer
           </a>
         ),
       });
@@ -93,20 +180,14 @@ export function VaultCard() {
       console.error("Deposit failed:", err);
       toast.error(parseTransactionError(err));
     }
-  }, [walletAddress, vaultAddress, amount, signer, send, getExplorerUrl]);
+  }, [walletAddress, vaultAddress, amount, signer, send, getExplorerUrl, walletLamports, depositLamports]);
 
   const handleWithdraw = useCallback(async () => {
     if (!walletAddress || !vaultAddress || !signer) return;
-
     try {
-      const instruction = getWithdrawInstruction({
-        signer,
-        vault: vaultAddress,
-      });
-
+      const instruction = getWithdrawInstruction({ signer, vault: vaultAddress });
       const signature = await send({ instructions: [instruction] });
-
-      toast.success("Withdrawal confirmed!", {
+      toast.success("Withdrawal confirmed! 💸", {
         description: (
           <a
             href={getExplorerUrl(`/tx/${signature}`)}
@@ -114,7 +195,7 @@ export function VaultCard() {
             rel="noopener noreferrer"
             className="underline"
           >
-            View transaction
+            View on Explorer
           </a>
         ),
       });
@@ -124,149 +205,294 @@ export function VaultCard() {
     }
   }, [walletAddress, vaultAddress, signer, send, getExplorerUrl]);
 
+  /* ── Not connected ───────────────────────────────────────────────── */
   if (status !== "connected") {
     return (
-      <section className="w-full space-y-4 rounded-2xl border border-border-low bg-card p-6 shadow-[0_20px_80px_-50px_rgba(0,0,0,0.35)]">
-        <div className="space-y-1">
-          <p className="text-lg font-semibold">SOL Vault</p>
-          <p className="text-sm text-muted">
-            Connect your wallet to interact with the vault program.
-          </p>
+      <section
+        id="vault-card"
+        className="glass-card animate-fade-in relative w-full overflow-hidden rounded-2xl p-6"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <LockIcon className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="font-semibold">SOL Vault</p>
+            <p className="text-sm text-muted">Connect your wallet to get started.</p>
+          </div>
         </div>
-        <div className="rounded-lg bg-cream/50 p-4 text-center text-sm text-muted">
-          Wallet not connected
+        <div className="mt-5 rounded-xl bg-cream/60 py-8 text-center">
+          <LockIcon className="mx-auto mb-2 h-8 w-8 text-muted" />
+          <p className="text-sm text-muted">Wallet not connected</p>
         </div>
       </section>
     );
   }
 
+  /* ── Connected ───────────────────────────────────────────────────── */
   return (
-    <section className="w-full space-y-4 rounded-2xl border border-border-low bg-card p-6 shadow-[0_20px_80px_-50px_rgba(0,0,0,0.35)]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-lg font-semibold">SOL Vault</p>
-          <p className="text-sm text-muted">
-            Deposit SOL into your personal vault PDA and withdraw anytime.
-          </p>
-        </div>
-        <span className="rounded-full bg-cream px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground/80">
-          {(vaultLamports ?? 0n) > 0n ? "Has funds" : "Empty"}
-        </span>
-      </div>
+    <section
+      id="vault-card"
+      className="glass-card animate-fade-in relative w-full overflow-hidden rounded-2xl"
+    >
+      {/* top accent bar */}
+      <div className="h-0.5 w-full bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
 
-      {/* Vault Balance */}
-      <div className="rounded-xl border border-border-low bg-cream/30 p-4">
-        <p className="text-xs uppercase tracking-wide text-muted">
-          Vault Balance
-        </p>
-        <p className="mt-1 text-3xl font-bold tabular-nums">
-          {vaultLamports ? lamportsToSolString(vaultLamports) : "0"}{" "}
-          <span className="text-lg font-normal text-muted">SOL</span>
-        </p>
-        {vaultAddress && (vaultLamports ?? 0n) > 0n && (
-          <p className="group mt-2 flex items-center gap-1.5">
+      <div className="p-6">
+        {/* Header */}
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <LockIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-semibold leading-none">SOL Vault</p>
+              <p className="mt-0.5 text-xs text-muted">
+                Personal PDA · only you can access
+              </p>
+            </div>
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+              hasVaultFunds
+                ? "bg-success/10 text-success"
+                : "bg-cream text-muted"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                hasVaultFunds ? "bg-success" : "bg-muted"
+              }`}
+            />
+            {hasVaultFunds ? "Active" : "Empty"}
+          </span>
+        </div>
+
+        {/* Vault Balance Panel */}
+        <div className="mb-6 overflow-hidden rounded-xl border border-border-low bg-gradient-to-br from-primary/5 to-transparent p-5">
+          <p className="mb-1 text-xs font-medium uppercase tracking-widest text-muted">
+            Vault Balance
+          </p>
+          <p className="text-4xl font-black tabular-nums tracking-tight">
+            {vaultLamports != null ? lamportsToSolString(vaultLamports) : "0.00"}
+            <span className="ml-2 text-xl font-normal text-muted">SOL</span>
+          </p>
+          {vaultUsd && (
+            <p className="mt-1 text-sm text-muted">≈ {vaultUsd}</p>
+          )}
+          {vaultAddress && hasVaultFunds && (
             <a
               href={getExplorerUrl(`/address/${vaultAddress}`)}
               target="_blank"
               rel="noopener noreferrer"
-              className="truncate font-mono text-xs text-muted underline underline-offset-2"
+              className="mt-3 inline-flex items-center gap-1 font-mono text-xs text-muted underline underline-offset-2 hover:text-primary"
             >
-              {vaultAddress}
-            </a>
-            <span
-              className="relative cursor-default text-muted"
-              title="This is your vault PDA — a program-derived account that holds your deposited SOL. Only you can withdraw from it."
-            >
+              {vaultAddress.slice(0, 8)}…{vaultAddress.slice(-8)}
               <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
               >
                 <path
-                  fillRule="evenodd"
-                  d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0ZM9 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6.75 8a.75.75 0 0 0 0 1.5h.75v1.75a.75.75 0 0 0 1.5 0v-2.5A.75.75 0 0 0 8.25 8h-1.5Z"
-                  clipRule="evenodd"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
                 />
               </svg>
-            </span>
-          </p>
-        )}
-      </div>
-
-      {/* Deposit Form */}
-      <div className="space-y-3">
-        <div className="flex gap-3">
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="Amount in SOL"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            disabled={isSending}
-            className="flex-1 rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm outline-none transition placeholder:text-muted focus:border-foreground/30 disabled:opacity-50 disabled:pointer-events-none"
-          />
-          <button
-            onClick={handleDeposit}
-            disabled={
-              isSending ||
-              !amount ||
-              parseFloat(amount) <= 0 ||
-              (vaultLamports ?? 0n) > 0n
-            }
-            className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-xs transition hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none"
-          >
-            {isSending ? "Confirming..." : "Deposit"}
-          </button>
+            </a>
+          )}
         </div>
-        {(vaultLamports ?? 0n) > 0n && (
-          <p className="text-xs text-muted">
-            Vault already has funds. Withdraw first before depositing again.
-          </p>
+
+        {/* Tabs */}
+        <div className="mb-5 flex rounded-xl border border-border-low bg-cream/40 p-1">
+          {(["deposit", "withdraw"] as const).map((t) => (
+            <button
+              key={t}
+              id={`vault-tab-${t}`}
+              onClick={() => setTab(t)}
+              className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium capitalize transition-all duration-200 ${
+                tab === t
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              {t === "deposit" ? (
+                <ArrowDownIcon className="h-3.5 w-3.5" />
+              ) : (
+                <ArrowUpIcon className="h-3.5 w-3.5" />
+              )}
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* Deposit tab */}
+        {tab === "deposit" && (
+          <div className="animate-fade-in space-y-3">
+            {hasVaultFunds && (
+              <div className="flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
+                <svg
+                  className="h-4 w-4 shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                  />
+                </svg>
+                Vault already holds funds. Withdraw before depositing again.
+              </div>
+            )}
+
+            {/* Quick-amount presets */}
+            <div className="flex gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  key={p}
+                  id={`preset-${p}`}
+                  onClick={() => setAmount(p)}
+                  disabled={hasVaultFunds || isSending}
+                  className={`flex-1 cursor-pointer rounded-lg border py-2 text-xs font-semibold transition-all disabled:pointer-events-none disabled:opacity-40 ${
+                    amount === p
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border-low bg-cream/60 hover:border-primary/40 hover:bg-cream"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            {/* Amount input */}
+            <div className="relative">
+              <input
+                id="deposit-amount-input"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                disabled={hasVaultFunds || isSending}
+                className="w-full rounded-xl border border-border bg-card/60 py-3 pl-4 pr-16 text-sm outline-none ring-0 transition-all placeholder:text-muted focus:border-primary/60 focus:ring-2 focus:ring-primary/20 disabled:pointer-events-none disabled:opacity-50"
+              />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-muted">
+                SOL
+              </span>
+            </div>
+
+            {depositUsd && !hasVaultFunds && (
+              <p className="pl-1 text-xs text-muted">≈ {depositUsd}</p>
+            )}
+
+            <button
+              id="deposit-btn"
+              onClick={handleDeposit}
+              disabled={
+                isSending ||
+                !amount ||
+                parseFloat(amount) <= 0 ||
+                hasVaultFunds
+              }
+              className="group relative w-full cursor-pointer overflow-hidden rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-md transition-all duration-200 hover:shadow-primary/30 hover:shadow-lg active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+            >
+              <span className="relative z-10 flex items-center justify-center gap-2">
+                {isSending ? (
+                  <>
+                    <SpinnerIcon className="h-4 w-4" />
+                    Confirming…
+                  </>
+                ) : (
+                  <>
+                    <ArrowDownIcon className="h-4 w-4" />
+                    Deposit SOL
+                  </>
+                )}
+              </span>
+              <span className="absolute inset-0 -translate-x-full bg-white/10 skew-x-12 transition-transform duration-500 group-hover:translate-x-full" />
+            </button>
+          </div>
         )}
-      </div>
 
-      {/* Withdraw Button */}
-      <button
-        onClick={handleWithdraw}
-        disabled={isSending || !vaultLamports}
-        className="w-full rounded-lg border border-border-low bg-card px-4 py-2.5 text-sm font-medium shadow-xs transition hover:bg-cream disabled:opacity-50 disabled:pointer-events-none"
-      >
-        {isSending ? "Confirming..." : "Withdraw All"}
-      </button>
+        {/* Withdraw tab */}
+        {tab === "withdraw" && (
+          <div className="animate-fade-in space-y-4">
+            <div className="rounded-xl border border-border-low bg-cream/40 p-4">
+              <p className="text-xs font-medium text-muted">You will receive</p>
+              <p className="mt-1 text-3xl font-bold tabular-nums">
+                {vaultLamports != null
+                  ? lamportsToSolString(vaultLamports)
+                  : "0"}{" "}
+                <span className="text-lg font-normal text-muted">SOL</span>
+              </p>
+              {vaultUsd && (
+                <p className="mt-0.5 text-sm text-muted">≈ {vaultUsd}</p>
+              )}
+            </div>
 
-      {/* Educational Footer */}
-      <div className="border-t border-border-low pt-4 text-xs text-muted">
-        <p className="mb-2">
-          This vault is an{" "}
-          <a
-            href="https://www.anchor-lang.com/docs"
-            target="_blank"
-            rel="noreferrer"
-            className="font-medium underline underline-offset-2"
-          >
-            Anchor program
-          </a>{" "}
-          deployed on devnet. Want to deploy your own?
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <a
-            href="https://www.anchor-lang.com/docs/quickstart"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-md bg-cream px-2 py-1 font-medium transition hover:bg-cream/70"
-          >
-            Anchor Quickstart
-          </a>
-          <a
-            href="https://solana.com/docs/programs/deploying"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-md bg-cream px-2 py-1 font-medium transition hover:bg-cream/70"
-          >
-            Deploy Programs
-          </a>
+            {!hasVaultFunds && (
+              <div className="flex items-center gap-2 rounded-xl border border-border-low bg-cream/40 px-4 py-3 text-xs text-muted">
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 8v4m0 4h.01"
+                  />
+                </svg>
+                Your vault is empty. Deposit SOL first.
+              </div>
+            )}
+
+            <button
+              id="withdraw-btn"
+              onClick={handleWithdraw}
+              disabled={isSending || !hasVaultFunds}
+              className="group relative w-full cursor-pointer overflow-hidden rounded-xl border border-border-low bg-card/60 py-3 text-sm font-semibold transition-all duration-200 hover:border-primary/40 hover:bg-cream active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+            >
+              <span className="relative z-10 flex items-center justify-center gap-2">
+                {isSending ? (
+                  <>
+                    <SpinnerIcon className="h-4 w-4" />
+                    Confirming…
+                  </>
+                ) : (
+                  <>
+                    <ArrowUpIcon className="h-4 w-4" />
+                    Withdraw All
+                  </>
+                )}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Info footer */}
+        <div className="mt-6 border-t border-border-low pt-4">
+          <p className="text-xs text-muted">
+            Your vault is a{" "}
+            <a
+              href="https://docs.solana.com/developing/programming-model/calling-between-programs#program-derived-addresses"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-primary underline underline-offset-2"
+            >
+              Program Derived Address
+            </a>{" "}
+            — only your wallet can deposit or withdraw.
+          </p>
         </div>
       </div>
     </section>

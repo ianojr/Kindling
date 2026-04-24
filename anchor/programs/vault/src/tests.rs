@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::ID as PROGRAM_ID;
+    use crate::{ID as PROGRAM_ID, CampaignStatus};
     use litesvm::LiteSVM;
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
@@ -13,158 +13,144 @@ mod tests {
 
     const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
-    fn get_vault_pda(signer: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(&[b"vault", signer.as_ref()], &PROGRAM_ID)
+    fn disc(name: &str) -> [u8; 8] {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        // Anchor discriminator = sha256("global:<name>")[0..8]
+        // We hard-code the known values for the test instructions:
+        match name {
+            "initialize" => [175, 175, 109, 31, 13, 152, 155, 237],
+            "create_profile" => [107, 42, 204, 152, 253, 216, 53, 109],
+            "create_campaign" => [14, 142, 142, 184, 197, 74, 204, 175],
+            "pledge" => [165, 252, 44, 55, 227, 221, 220, 183],
+            _ => {
+                let mut h = DefaultHasher::new();
+                name.hash(&mut h);
+                let v = h.finish().to_le_bytes();
+                [v[0],v[1],v[2],v[3],v[4],v[5],v[6],v[7]]
+            }
+        }
     }
 
-    fn create_deposit_ix(signer: &Pubkey, vault: &Pubkey, amount: u64) -> Instruction {
-        // Anchor discriminator for "deposit" = hash("global:deposit")[0..8]
-        let discriminator: [u8; 8] = [242, 35, 198, 137, 82, 225, 242, 182];
-        let mut data = discriminator.to_vec();
-        data.extend_from_slice(&amount.to_le_bytes());
+    fn global_state_pda() -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"global_state"], &PROGRAM_ID)
+    }
+    fn profile_pda(owner: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"creator_profile", owner.as_ref()], &PROGRAM_ID)
+    }
+    fn campaign_pda(creator: &Pubkey, id: u64) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"campaign", creator.as_ref(), &id.to_le_bytes()], &PROGRAM_ID)
+    }
+    fn vault_pda(campaign: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"campaign_vault", campaign.as_ref()], &PROGRAM_ID)
+    }
+    fn contribution_pda(campaign: &Pubkey, backer: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"contribution", campaign.as_ref(), backer.as_ref()], &PROGRAM_ID)
+    }
 
-        Instruction {
+    fn setup() -> (LiteSVM, Keypair) {
+        let mut svm = LiteSVM::new();
+        let program_bytes = include_bytes!("../../../target/deploy/kindling.so");
+        svm.add_program(PROGRAM_ID, program_bytes);
+        let admin = Keypair::new();
+        svm.airdrop(&admin.pubkey(), 100 * LAMPORTS_PER_SOL).unwrap();
+        (svm, admin)
+    }
+
+    fn init_platform(svm: &mut LiteSVM, admin: &Keypair) -> Pubkey {
+        let (global_state, _) = global_state_pda();
+        let data = disc("initialize").to_vec();
+        let ix = Instruction {
             program_id: PROGRAM_ID,
             accounts: vec![
-                AccountMeta::new(*signer, true),
-                AccountMeta::new(*vault, false),
+                AccountMeta::new(admin.pubkey(), true),
+                AccountMeta::new(global_state, false),
                 AccountMeta::new_readonly(system_program::ID, false),
             ],
             data,
-        }
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix], Some(&admin.pubkey()), &[admin], svm.latest_blockhash(),
+        );
+        svm.send_transaction(tx).expect("initialize should succeed");
+        global_state
     }
 
-    fn create_withdraw_ix(signer: &Pubkey, vault: &Pubkey) -> Instruction {
-        // Anchor discriminator for "withdraw" = hash("global:withdraw")[0..8]
-        let discriminator: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
+    #[test]
+    fn test_initialize() {
+        let (mut svm, admin) = setup();
+        let gs = init_platform(&mut svm, &admin);
+        assert!(svm.get_account(&gs).is_some(), "GlobalState should exist");
+    }
 
-        Instruction {
+    #[test]
+    fn test_create_profile() {
+        let (mut svm, admin) = setup();
+        init_platform(&mut svm, &admin);
+        let (profile, _) = profile_pda(&admin.pubkey());
+
+        let name = "Alice";
+        let bio = "Builder";
+        let avatar = "";
+        let twitter = "@alice";
+
+        let mut data = disc("create_profile").to_vec();
+        // AnchorSerialize: string = 4-byte LE length + bytes
+        for s in &[name, bio, avatar, twitter] {
+            let b = s.as_bytes();
+            data.extend_from_slice(&(b.len() as u32).to_le_bytes());
+            data.extend_from_slice(b);
+        }
+
+        let ix = Instruction {
             program_id: PROGRAM_ID,
             accounts: vec![
-                AccountMeta::new(*signer, true),
-                AccountMeta::new(*vault, false),
+                AccountMeta::new(admin.pubkey(), true),
+                AccountMeta::new(profile, false),
                 AccountMeta::new_readonly(system_program::ID, false),
             ],
-            data: discriminator.to_vec(),
+            data,
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix], Some(&admin.pubkey()), &[&admin], svm.latest_blockhash(),
+        );
+        svm.send_transaction(tx).expect("create_profile should succeed");
+        assert!(svm.get_account(&profile).is_some(), "Profile should exist");
+    }
+
+    #[test]
+    fn test_create_campaign_validation() {
+        let (mut svm, admin) = setup();
+        let (global_state, _) = global_state_pda();
+        init_platform(&mut svm, &admin);
+        let (campaign, _) = campaign_pda(&admin.pubkey(), 0);
+        let (vault, _) = vault_pda(&campaign);
+
+        // Goal below minimum (0.05 SOL) should fail
+        let mut data = disc("create_campaign").to_vec();
+        for s in &["Test Campaign", "Description", "https://img.com/x.png"] {
+            let b = s.as_bytes();
+            data.extend_from_slice(&(b.len() as u32).to_le_bytes());
+            data.extend_from_slice(b);
         }
-    }
+        data.push(0u8); // category = Technology
+        data.extend_from_slice(&50_000_000u64.to_le_bytes()); // goal = 0.05 SOL (too low)
+        data.extend_from_slice(&86_400i64.to_le_bytes()); // 1 day
 
-    #[test]
-    fn test_deposit_and_withdraw() {
-        let mut svm = LiteSVM::new();
-
-        // Load the program
-        let program_bytes = include_bytes!("../../../target/deploy/vault.so");
-        svm.add_program(PROGRAM_ID, program_bytes);
-
-        // Create a user with some SOL
-        let user = Keypair::new();
-        svm.airdrop(&user.pubkey(), 10 * LAMPORTS_PER_SOL).unwrap();
-
-        // Get vault PDA
-        let (vault_pda, _bump) = get_vault_pda(&user.pubkey());
-
-        // Deposit 1 SOL
-        let deposit_amount = LAMPORTS_PER_SOL;
-        let deposit_ix = create_deposit_ix(&user.pubkey(), &vault_pda, deposit_amount);
-
-        let blockhash = svm.latest_blockhash();
-        let deposit_tx = Transaction::new_signed_with_payer(
-            &[deposit_ix],
-            Some(&user.pubkey()),
-            &[&user],
-            blockhash,
-        );
-
-        let result = svm.send_transaction(deposit_tx);
-        assert!(result.is_ok(), "Deposit should succeed");
-
-        // Check vault balance
-        let vault_account = svm.get_account(&vault_pda).unwrap();
-        assert_eq!(vault_account.lamports, deposit_amount);
-
-        // Withdraw
-        let withdraw_ix = create_withdraw_ix(&user.pubkey(), &vault_pda);
-
-        let blockhash = svm.latest_blockhash();
-        let withdraw_tx = Transaction::new_signed_with_payer(
-            &[withdraw_ix],
-            Some(&user.pubkey()),
-            &[&user],
-            blockhash,
-        );
-
-        let result = svm.send_transaction(withdraw_tx);
-        assert!(result.is_ok(), "Withdraw should succeed");
-
-        // Check vault is empty (account may not exist or have 0 lamports)
-        let vault_account = svm.get_account(&vault_pda);
-        assert!(
-            vault_account.is_none() || vault_account.unwrap().lamports == 0,
-            "Vault should be empty after withdraw"
-        );
-    }
-
-    #[test]
-    fn test_deposit_fails_if_vault_has_funds() {
-        let mut svm = LiteSVM::new();
-
-        let program_bytes = include_bytes!("../../../target/deploy/vault.so");
-        svm.add_program(PROGRAM_ID, program_bytes);
-
-        let user = Keypair::new();
-        svm.airdrop(&user.pubkey(), 10 * LAMPORTS_PER_SOL).unwrap();
-
-        let (vault_pda, _bump) = get_vault_pda(&user.pubkey());
-
-        // First deposit
-        let deposit_ix = create_deposit_ix(&user.pubkey(), &vault_pda, LAMPORTS_PER_SOL);
-        let blockhash = svm.latest_blockhash();
+        let ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(admin.pubkey(), true),
+                AccountMeta::new(campaign, false),
+                AccountMeta::new_readonly(vault, false),
+                AccountMeta::new(global_state, false),
+                AccountMeta::new_readonly(system_program::ID, false),
+            ],
+            data,
+        };
         let tx = Transaction::new_signed_with_payer(
-            &[deposit_ix],
-            Some(&user.pubkey()),
-            &[&user],
-            blockhash,
+            &[ix], Some(&admin.pubkey()), &[&admin], svm.latest_blockhash(),
         );
-        svm.send_transaction(tx).unwrap();
-
-        // Second deposit should fail
-        let deposit_ix2 = create_deposit_ix(&user.pubkey(), &vault_pda, LAMPORTS_PER_SOL);
-        let blockhash = svm.latest_blockhash();
-        let tx2 = Transaction::new_signed_with_payer(
-            &[deposit_ix2],
-            Some(&user.pubkey()),
-            &[&user],
-            blockhash,
-        );
-
-        let result = svm.send_transaction(tx2);
-        assert!(result.is_err(), "Second deposit should fail");
-    }
-
-    #[test]
-    fn test_withdraw_fails_if_vault_empty() {
-        let mut svm = LiteSVM::new();
-
-        let program_bytes = include_bytes!("../../../target/deploy/vault.so");
-        svm.add_program(PROGRAM_ID, program_bytes);
-
-        let user = Keypair::new();
-        svm.airdrop(&user.pubkey(), 10 * LAMPORTS_PER_SOL).unwrap();
-
-        let (vault_pda, _bump) = get_vault_pda(&user.pubkey());
-
-        // Try to withdraw from empty vault
-        let withdraw_ix = create_withdraw_ix(&user.pubkey(), &vault_pda);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(
-            &[withdraw_ix],
-            Some(&user.pubkey()),
-            &[&user],
-            blockhash,
-        );
-
-        let result = svm.send_transaction(tx);
-        assert!(result.is_err(), "Withdraw from empty vault should fail");
+        assert!(svm.send_transaction(tx).is_err(), "Low goal should fail");
     }
 }

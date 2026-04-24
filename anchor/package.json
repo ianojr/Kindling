@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "initialize": "ts-node --project tsconfig.json scripts/initialize.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/web3.js": "^1.98.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

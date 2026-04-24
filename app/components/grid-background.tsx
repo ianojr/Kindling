@@ -2,75 +2,74 @@
 
 export function GridBackground() {
   return (
-    <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-      {/* Ambient glow */}
+    <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+      {/* Deep space gradient */}
       <div
-        className="absolute inset-0 transition-opacity duration-500"
+        className="absolute inset-0"
         style={{
-          background: [
-            "radial-gradient(ellipse 30% 28% at 30% 50%, rgba(153,69,255,0.08) 0%, transparent 70%)",
-            "radial-gradient(ellipse 30% 28% at 70% 50%, rgba(20,241,149,0.08) 0%, transparent 70%)",
-          ].join(", "),
+          background:
+            "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(124,58,237,0.18) 0%, transparent 70%)",
         }}
       />
 
-      {/* Large grid — purple (left) */}
+      {/* Orb top-left */}
       <div
-        className="absolute inset-0 opacity-80 dark:opacity-60"
+        className="absolute -left-40 -top-40 h-[600px] w-[600px] rounded-full opacity-20 blur-[120px] dark:opacity-30"
         style={{
-          backgroundImage: `
-            linear-gradient(to right, rgba(153,69,255,0.18) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(153,69,255,0.18) 1px, transparent 1px)
-          `,
-          backgroundSize: "80px 80px",
-          mask: "radial-gradient(ellipse 30% 35% at 30% 50%, black, transparent)",
-          WebkitMask:
-            "radial-gradient(ellipse 30% 35% at 30% 50%, black, transparent)",
+          background:
+            "radial-gradient(circle, #7c3aed 0%, #4f46e5 50%, transparent 80%)",
+        }}
+      />
+      {/* Orb bottom-right */}
+      <div
+        className="absolute -bottom-60 -right-40 h-[700px] w-[700px] rounded-full opacity-15 blur-[140px] dark:opacity-25"
+        style={{
+          background:
+            "radial-gradient(circle, #8b5cf6 0%, #3b82f6 60%, transparent 80%)",
+        }}
+      />
+      {/* Center mid-glow */}
+      <div
+        className="absolute left-1/2 top-1/2 h-[400px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-5 blur-[100px] dark:opacity-10"
+        style={{
+          background:
+            "radial-gradient(circle, #a78bfa 0%, transparent 70%)",
         }}
       />
 
-      {/* Large grid — green (right) */}
+      {/* Subtle grid lines - light */}
       <div
-        className="absolute inset-0 opacity-80 dark:opacity-60"
+        className="absolute inset-0 opacity-100 dark:opacity-0"
         style={{
-          backgroundImage: `
-            linear-gradient(to right, rgba(20,241,149,0.18) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(20,241,149,0.18) 1px, transparent 1px)
-          `,
-          backgroundSize: "80px 80px",
-          mask: "radial-gradient(ellipse 30% 35% at 70% 50%, black, transparent)",
+          backgroundImage: `linear-gradient(to right, rgba(124,58,237,0.07) 1px, transparent 1px),
+                           linear-gradient(to bottom, rgba(124,58,237,0.07) 1px, transparent 1px)`,
+          backgroundSize: "48px 48px",
+          mask: "radial-gradient(ellipse 80% 80% at 50% 0%, black, transparent)",
           WebkitMask:
-            "radial-gradient(ellipse 30% 35% at 70% 50%, black, transparent)",
+            "radial-gradient(ellipse 80% 80% at 50% 0%, black, transparent)",
+        }}
+      />
+      {/* Subtle grid lines - dark */}
+      <div
+        className="absolute inset-0 opacity-0 dark:opacity-100"
+        style={{
+          backgroundImage: `linear-gradient(to right, rgba(139,92,246,0.06) 1px, transparent 1px),
+                           linear-gradient(to bottom, rgba(139,92,246,0.06) 1px, transparent 1px)`,
+          backgroundSize: "48px 48px",
+          mask: "radial-gradient(ellipse 80% 80% at 50% 0%, black, transparent)",
+          WebkitMask:
+            "radial-gradient(ellipse 80% 80% at 50% 0%, black, transparent)",
         }}
       />
 
-      {/* Small grid — purple (left) */}
+      {/* Animated diagonal shimmer strip */}
       <div
-        className="absolute inset-0 opacity-80 dark:opacity-60"
+        className="absolute inset-0 opacity-0 dark:opacity-100"
         style={{
-          backgroundImage: `
-            linear-gradient(to right, rgba(153,69,255,0.10) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(153,69,255,0.10) 1px, transparent 1px)
-          `,
-          backgroundSize: "16px 16px",
-          mask: "radial-gradient(ellipse 30% 35% at 30% 50%, black, transparent)",
-          WebkitMask:
-            "radial-gradient(ellipse 30% 35% at 30% 50%, black, transparent)",
-        }}
-      />
-
-      {/* Small grid — green (right) */}
-      <div
-        className="absolute inset-0 opacity-80 dark:opacity-60"
-        style={{
-          backgroundImage: `
-            linear-gradient(to right, rgba(20,241,149,0.10) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(20,241,149,0.10) 1px, transparent 1px)
-          `,
-          backgroundSize: "16px 16px",
-          mask: "radial-gradient(ellipse 30% 35% at 70% 50%, black, transparent)",
-          WebkitMask:
-            "radial-gradient(ellipse 30% 35% at 70% 50%, black, transparent)",
+          background:
+            "linear-gradient(135deg, transparent 40%, rgba(139,92,246,0.03) 50%, transparent 60%)",
+          backgroundSize: "400% 400%",
+          animation: "gradient-shift 12s ease infinite",
         }}
       />
     </div>

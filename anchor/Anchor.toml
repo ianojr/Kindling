@@ -1,11 +1,12 @@
 [toolchain]
+anchor_version = "0.31.1"
 
 [features]
 resolution = true
 skip-lint = false
 
 [programs.devnet]
-vault = "6z947rTY9i2ba2TTxTZ2aZqSNZ2Da8yQDP3WWzfjH4rp"
+kindling = "JAL6KieMTfamqTRyPMx5CLUnDUU7GVaV7aSaEJhYSHHt"
 
 [registry]
 url = "https://api.apr.dev"
@@ -16,3 +17,4 @@ wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "cargo test"
+initialize = "npm install --silent && node_modules/.bin/ts-node --project tsconfig.json scripts/initialize.ts"
