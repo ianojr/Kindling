@@ -154,18 +154,18 @@ export async function getContributionPda(campaign: string, backer: string) {
 }
 
 /* ── Instruction builders ───────────────────────────────────────────────── */
-import type { IInstruction, IAccountMeta } from "@solana/kit";
+import type { Instruction, AccountMeta } from "@solana/kit";
 import { AccountRole } from "@solana/kit";
 
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
-function W(addr: string): IAccountMeta { return { address: addr as import("@solana/kit").Address, role: AccountRole.WRITABLE }; }
-function R2(addr: string): IAccountMeta { return { address: addr as import("@solana/kit").Address, role: AccountRole.READONLY }; }
-function WS(addr: string): IAccountMeta { return { address: addr as import("@solana/kit").Address, role: AccountRole.WRITABLE_SIGNER }; }
+function W(addr: string): AccountMeta { return { address: addr as import("@solana/kit").Address, role: AccountRole.WRITABLE }; }
+function R2(addr: string): AccountMeta { return { address: addr as import("@solana/kit").Address, role: AccountRole.READONLY }; }
+function WS(addr: string): AccountMeta { return { address: addr as import("@solana/kit").Address, role: AccountRole.WRITABLE_SIGNER }; }
 
 export async function buildCreateCampaignIx(
   creator: string, globalStatePda: string, campaignCount: bigint,
   args: { title: string; description: string; imageUrl: string; category: number; goal: bigint; deadlineSecs: number }
-): Promise<IInstruction> {
+): Promise<Instruction> {
   const [campaignPda] = await getCampaignPda(creator, campaignCount);
   const [vaultPda] = await getVaultPda(campaignPda);
   const w = new BorshWriter();
@@ -181,7 +181,7 @@ export async function buildCreateCampaignIx(
 
 export async function buildPledgeIx(
   backer: string, campaign: Campaign, globalStatePda: string, amount: bigint
-): Promise<IInstruction> {
+): Promise<Instruction> {
   const [contributionPda] = await getContributionPda(campaign.publicKey, backer);
   const [vaultPda] = await getVaultPda(campaign.publicKey);
   const w = new BorshWriter(); w.u64(amount);
@@ -195,7 +195,7 @@ export async function buildPledgeIx(
 
 export async function buildWithdrawIx(
   creator: string, campaign: Campaign, globalStatePda: string, authority: string
-): Promise<IInstruction> {
+): Promise<Instruction> {
   const [vaultPda] = await getVaultPda(campaign.publicKey);
   const data = await IX.withdraw();
   return {
@@ -207,7 +207,7 @@ export async function buildWithdrawIx(
 
 export async function buildRefundIx(
   backer: string, campaign: Campaign
-): Promise<IInstruction> {
+): Promise<Instruction> {
   const [contributionPda] = await getContributionPda(campaign.publicKey, backer);
   const [vaultPda] = await getVaultPda(campaign.publicKey);
   const data = await IX.refund();
@@ -220,7 +220,7 @@ export async function buildRefundIx(
 
 export async function buildCreateProfileIx(
   signer: string, args: { name: string; bio: string; avatarUrl: string; twitter: string }
-): Promise<IInstruction> {
+): Promise<Instruction> {
   const [profilePda] = await getProfilePda(signer);
   const w = new BorshWriter();
   w.str(args.name); w.str(args.bio); w.str(args.avatarUrl); w.str(args.twitter);
